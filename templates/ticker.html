@@ -122,7 +122,7 @@
           <td id="live-price">--</td>
           <td id="channel-direction">--</td>
           <td id="channel-width">--</td>
-          <td><button class="trade-btn">Разрешить торговлю</button></td>
+          <td><button class="trade-btn" id="trade-toggle-btn">Загрузка...</button></td>
         </tr>
       </tbody>
     </table>
@@ -237,9 +237,37 @@
     }
   }
 
-  setInterval(updateLiveInfo, 1000);
+  async function updateTradeButton() {
+    try {
+      const res = await fetch(`/api/symbols/${symbolName}`);
+      const data = await res.json();
+      const btn = document.getElementById("trade-toggle-btn");
+      if (data.tradepermission === "enabled") {
+        btn.textContent = "Остановить торговлю";
+        btn.className = "trade-btn trade-enabled";
+      } else {
+        btn.textContent = "Разрешить торговлю";
+        btn.className = "trade-btn trade-disabled";
+      }
+    } catch (e) {
+      console.error("Ошибка получения статуса торговли:", e);
+    }
+  }
+
+  async function toggleTradeStatus() {
+    try {
+      await fetch(`/api/symbols/${symbolName}/toggle-trade`, { method: "POST" });
+      updateTradeButton();
+    } catch (e) {
+      console.error("Ошибка переключения торговли:", e);
+    }
+  }
+
+  // 🔽 Эти вызовы теперь в самом конце
+  document.getElementById("trade-toggle-btn").addEventListener("click", toggleTradeStatus);
   updateLiveInfo();
+  updateTradeButton();
+  setInterval(updateLiveInfo, 1000);
 </script>
 </body>
 </html>
-<!-- test 2025-04-09 -->

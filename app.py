@@ -926,6 +926,83 @@ def toggle_trade_permission(symbol):
         return jsonify({"symbol": symbol.upper(), "new_status": new_status})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+# === МОДУЛЬ 15: Работа со стратегиями ===
+
+from flask import request
+
+# Получить данные стратегии по имени
+@app.route("/api/strategy/<name>")
+def get_strategy(name):
+    try:
+        conn = psycopg2.connect(
+            dbname=os.environ.get("PG_NAME"),
+            user=os.environ.get("PG_USER"),
+            password=os.environ.get("PG_PASSWORD"),
+            host=os.environ.get("PG_HOST"),
+            port=os.environ.get("PG_PORT", 5432)
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT name, size, leverage, description FROM strategy WHERE name = %s", (name,))
+        row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            return jsonify({"error": "Strategy not found"}), 404
+
+        return jsonify({
+            "name": row[0],
+            "size": row[1],
+            "leverage": row[2],
+            "description": row[3]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Сохранить новую стратегию или обновить существующую
+@app.route("/api/strategy", methods=["POST"])
+@app.route("/api/strategy/<name>", methods=["POST"])
+def save_strategy(name=None):
+    try:
+        data = request.get_json()
+        name = name or data.get("name")
+        size = data.get("size")
+        leverage = data.get("leverage")
+        description = data.get("description", "")
+
+        if not name or size is None or leverage is None:
+            return jsonify({"error": "Missing required fields"}), 400
+
+        conn = psycopg2.connect(
+            dbname=os.environ.get("PG_NAME"),
+            user=os.environ.get("PG_USER"),
+            password=os.environ.get("PG_PASSWORD"),
+            host=os.environ.get("PG_HOST"),
+            port=os.environ.get("PG_PORT", 5432)
+        )
+        cur = conn.cursor()
+
+        # Проверка — существует ли стратегия
+        cur.execute("SELECT 1 FROM strategy WHERE name = %s", (name,))
+        exists = cur.fetchone()
+
+        if exists:
+            cur.execute("""
+                UPDATE strategy
+                SET size = %s, leverage = %s, description = %s
+                WHERE name = %s
+            """, (size, leverage, description, name))
+        else:
+            cur.execute("""
+                INSERT INTO strategy (name, size, leverage, description)
+                VALUES (%s, %s, %s, %s)
+            """, (name, size, leverage, description))
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({"status": "success", "name": name})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # Запуск сервера + инициализация
 if __name__ == "__main__":
     init_db()

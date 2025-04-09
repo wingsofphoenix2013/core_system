@@ -928,9 +928,14 @@ def toggle_trade_permission(symbol):
         return jsonify({"error": str(e)}), 500
 # === МОДУЛЬ 15: Работа со стратегиями ===
 
-from flask import request
+from flask import request, render_template
 
-# Получить данные стратегии по имени
+# 🔹 Отображение страницы настройки стратегии
+@app.route("/strategy")
+def strategy_page():
+    return render_template("strategy.html")
+
+# 🔹 Получение данных по стратегии
 @app.route("/api/strategy/<name>")
 def get_strategy(name):
     try:
@@ -958,7 +963,7 @@ def get_strategy(name):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Сохранить новую стратегию или обновить существующую
+# 🔹 Сохранение стратегии (создание или обновление)
 @app.route("/api/strategy", methods=["POST"])
 @app.route("/api/strategy/<name>", methods=["POST"])
 def save_strategy(name=None):
@@ -981,7 +986,7 @@ def save_strategy(name=None):
         )
         cur = conn.cursor()
 
-        # Проверка — существует ли стратегия
+        # Проверка существования стратегии
         cur.execute("SELECT 1 FROM strategy WHERE name = %s", (name,))
         exists = cur.fetchone()
 

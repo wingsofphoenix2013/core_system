@@ -930,12 +930,17 @@ def toggle_trade_permission(symbol):
 
 from flask import request, render_template
 
-# 🔹 Отображение страницы настройки стратегии
+# 🔹 Страница: настройка одной стратегии
 @app.route("/strategy")
 def strategy_page():
     return render_template("strategy.html")
 
-# 🔹 Получение данных по стратегии
+# 🔹 Страница: список всех стратегий
+@app.route("/strategies")
+def strategies_page():
+    return render_template("strategies.html")
+
+# 🔹 Получение одной стратегии
 @app.route("/api/strategy/<name>")
 def get_strategy(name):
     try:
@@ -963,7 +968,7 @@ def get_strategy(name):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 🔹 Сохранение стратегии (создание или обновление)
+# 🔹 Сохранение (создание или обновление)
 @app.route("/api/strategy", methods=["POST"])
 @app.route("/api/strategy/<name>", methods=["POST"])
 def save_strategy(name=None):
@@ -986,7 +991,6 @@ def save_strategy(name=None):
         )
         cur = conn.cursor()
 
-        # Проверка существования стратегии
         cur.execute("SELECT 1 FROM strategy WHERE name = %s", (name,))
         exists = cur.fetchone()
 
@@ -1008,7 +1012,6 @@ def save_strategy(name=None):
         return jsonify({"status": "success", "name": name})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-# === МОДУЛЬ 16: Список стратегий и переключение торговли ===
 
 # 🔹 Получение всех стратегий
 @app.route("/api/strategies")
@@ -1041,7 +1044,7 @@ def get_all_strategies():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 🔹 Переключение торговли по стратегии
+# 🔹 Переключение статуса торговли по стратегии
 @app.route("/api/strategy/<name>/toggle-trade", methods=["POST"])
 def toggle_strategy_trade(name):
     try:

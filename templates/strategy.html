@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Настройка стратегии</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+      background: #f9f9f9;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .main-block {
+      width: 100%;
+      max-width: 600px;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      box-shadow: 2px 2px 6px rgba(0,0,0,0.05);
+      padding: 20px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-size: 16px;
+    }
+    .btn {
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .btn:disabled {
+      background: #999;
+    }
+  </style>
+</head>
+<body>
+<div class="main-block">
+  <a href="/" class="btn" style="margin-bottom: 20px;">← Назад</a>
+  <h2 style="text-align:center; margin-bottom: 30px;">Настройка стратегии</h2>
+
+  <div class="form-group">
+    <label for="strategy-name">Название стратегии</label>
+    <input type="text" id="strategy-name" placeholder="Например: breakout-v1">
+  </div>
+
+  <div class="form-group">
+    <label for="strategy-size">Размер сделки ($)</label>
+    <input type="number" id="strategy-size" min="0">
+  </div>
+
+  <div class="form-group">
+    <label for="strategy-leverage">Кредитное плечо</label>
+    <input type="number" id="strategy-leverage" min="1" step="1">
+  </div>
+
+  <div class="form-group">
+    <label for="strategy-description">Описание</label>
+    <textarea id="strategy-description" rows="4" placeholder="Краткое описание логики стратегии..."></textarea>
+  </div>
+
+  <button class="btn" onclick="saveStrategy()">Сохранить</button>
+</div>
+
+<script>
+  const urlParams = new URLSearchParams(window.location.search);
+  const strategyName = urlParams.get('name');
+
+  async function loadStrategy() {
+    if (!strategyName) return;
+
+    document.getElementById("strategy-name").value = strategyName;
+    document.getElementById("strategy-name").disabled = true;
+
+    const res = await fetch(`/api/strategy/${strategyName}`);
+    const data = await res.json();
+    if (data.error) return;
+
+    document.getElementById("strategy-size").value = data.size;
+    document.getElementById("strategy-leverage").value = data.leverage;
+    document.getElementById("strategy-description").value = data.description || "";
+  }
+
+  async function saveStrategy() {
+    const name = document.getElementById("strategy-name").value.trim();
+    const size = parseFloat(document.getElementById("strategy-size").value);
+    const leverage = parseFloat(document.getElementById("strategy-leverage").value);
+    const description = document.getElementById("strategy-description").value;
+
+    if (!name || isNaN(size) || isNaN(leverage)) {
+      alert("Пожалуйста, заполните все обязательные поля.");
+      return;
+    }
+
+    const payload = { name, size, leverage, description };
+    const method = strategyName ? "POST" : "POST";
+
+    const url = strategyName ? `/api/strategy/${name}` : `/api/strategy`;
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await res.json();
+    if (result.error) {
+      alert("Ошибка: " + result.error);
+    } else {
+      alert("Стратегия успешно сохранена.");
+    }
+  }
+
+  loadStrategy();
+</script>
+</body>
+</html>

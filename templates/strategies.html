@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Список стратегий</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+      background: #f9f9f9;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .main-block {
+      width: 100%;
+      max-width: 1000px;
+    }
+    .btn {
+      display: inline-block;
+      margin-bottom: 20px;
+      padding: 8px 12px;
+      background: #007bff;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+    }
+    .tools-box {
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      box-shadow: 2px 2px 6px rgba(0,0,0,0.05);
+      padding: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: center;
+    }
+    th {
+      background: #eee;
+    }
+    .trade-btn {
+      padding: 6px 10px;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .trade-enabled { background: red; }
+    .trade-disabled { background: green; }
+    .edit-btn {
+      padding: 6px 10px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+<div class="main-block">
+  <a href="/" class="btn">← Назад</a>
+
+  <div class="tools-box">
+    <h3 style="margin-left: 10px;">Стратегии</h3>
+    <table id="strategies-table">
+      <thead>
+        <tr>
+          <th>Название</th>
+          <th>Размер сделки</th>
+          <th>Плечо</th>
+          <th>Описание</th>
+          <th>PnL</th>
+          <th>Торговля</th>
+          <th>Редактировать</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- строки будут заполняться через JS -->
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  async function loadStrategies() {
+    try {
+      const res = await fetch("/api/strategies");
+      const data = await res.json();
+      const tbody = document.querySelector("#strategies-table tbody");
+      tbody.innerHTML = "";
+
+      data.forEach(s => {
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+          <td>${s.name}</td>
+          <td>${s.size}</td>
+          <td>${s.leverage}</td>
+          <td>${s.description || ""}</td>
+          <td>0</td>
+          <td>
+            <button class="trade-btn ${s.tradepermission === 'enabled' ? 'trade-enabled' : 'trade-disabled'}"
+              onclick="toggleTrade('${s.name}', this)">
+              ${s.tradepermission === 'enabled' ? 'Остановить' : 'Разрешить'}
+            </button>
+          </td>
+          <td>
+            <a href="/strategy?name=${encodeURIComponent(s.name)}" class="edit-btn">Редактировать</a>
+          </td>
+        `;
+
+        tbody.appendChild(row);
+      });
+    } catch (e) {
+      console.error("Ошибка загрузки стратегий:", e);
+    }
+  }
+
+  async function toggleTrade(name, btn) {
+    try {
+      const res = await fetch(`/api/strategy/${name}/toggle-trade`, { method: "POST" });
+      const data = await res.json();
+      if (data.new_status === "enabled") {
+        btn.className = "trade-btn trade-enabled";
+        btn.textContent = "Остановить";
+      } else {
+        btn.className = "trade-btn trade-disabled";
+        btn.textContent = "Разрешить";
+      }
+    } catch (e) {
+      console.error("Ошибка переключения статуса:", e);
+    }
+  }
+
+  loadStrategies();
+</script>
+</body>
+</html>

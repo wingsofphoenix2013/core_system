@@ -1008,6 +1008,68 @@ def save_strategy(name=None):
         return jsonify({"status": "success", "name": name})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+# === МОДУЛЬ 16: Список стратегий и переключение торговли ===
+
+# 🔹 Получение всех стратегий
+@app.route("/api/strategies")
+def get_all_strategies():
+    try:
+        conn = psycopg2.connect(
+            dbname=os.environ.get("PG_NAME"),
+            user=os.environ.get("PG_USER"),
+            password=os.environ.get("PG_PASSWORD"),
+            host=os.environ.get("PG_HOST"),
+            port=os.environ.get("PG_PORT", 5432)
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT name, size, leverage, description, tradepermission FROM strategy ORDER BY name")
+        rows = cur.fetchall()
+        conn.close()
+
+        strategies = [
+            {
+                "name": row[0],
+                "size": row[1],
+                "leverage": row[2],
+                "description": row[3],
+                "tradepermission": row[4]
+            }
+            for row in rows
+        ]
+
+        return jsonify(strategies)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 🔹 Переключение торговли по стратегии
+@app.route("/api/strategy/<name>/toggle-trade", methods=["POST"])
+def toggle_strategy_trade(name):
+    try:
+        conn = psycopg2.connect(
+            dbname=os.environ.get("PG_NAME"),
+            user=os.environ.get("PG_USER"),
+            password=os.environ.get("PG_PASSWORD"),
+            host=os.environ.get("PG_HOST"),
+            port=os.environ.get("PG_PORT", 5432)
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT tradepermission FROM strategy WHERE name = %s", (name,))
+        row = cur.fetchone()
+
+        if not row:
+            conn.close()
+            return jsonify({"error": "Strategy not found"}), 404
+
+        current = row[0]
+        new_status = "disabled" if current == "enabled" else "enabled"
+
+        cur.execute("UPDATE strategy SET tradepermission = %s WHERE name = %s", (new_status, name))
+        conn.commit()
+        conn.close()
+
+        return jsonify({"name": name, "new_status": new_status})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # Запуск сервера + инициализация
 if __name__ == "__main__":
     init_db()

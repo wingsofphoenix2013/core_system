@@ -15,7 +15,7 @@ PG_PASSWORD = os.environ.get("PG_PASSWORD")
 
 # Основной цикл фонового воркера
 def run_executor():
-    print("🚀 Trade Executor запущен")
+    print("🚀 Trade Executor запущен", flush=True)
     while True:
         try:
             # Подключение к базе
@@ -40,13 +40,13 @@ def run_executor():
             conn.close()
 
             for ts, symbol, action in signals:
-                print(f"[{ts}] 🛰️ {action} {symbol}")
+                print(f"[{ts}] 🛰️ {action} {symbol}", flush=True)
 
                 # 🔧 Здесь будет запуск логики стратегии (например, channel_vilarso)
                 # TODO: реализовать запуск стратегии
 
         except Exception as e:
-            print("❌ Ошибка в trade_executor:", e)
+            print("❌ Ошибка в trade_executor:", e, flush=True)
 
         time.sleep(10)  # ⏱ Проверка каждые 10 секунд
 

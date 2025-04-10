@@ -46,6 +46,66 @@ def run_channel_vilarso(symbol, action, signal_time):
 
     execute_trade(symbol, action, "channel_vilarso")
     print(f"✅ Сделка открыта по {symbol}", flush=True)
+# === Расчёт канала по логике TV (49 свечей + latest_price) ===
+def calculate_channel(symbol, latest_price, conn=None):
+    try:
+        import numpy as np
+        import math
+        import psycopg2
+
+        if conn is None:
+            conn = psycopg2.connect(
+                dbname=PG_NAME,
+                user=PG_USER,
+                password=PG_PASSWORD,
+                host=PG_HOST,
+                port=PG_PORT
+            )
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT timestamp, close
+            FROM candles_5m
+            WHERE symbol = %s
+            ORDER BY timestamp DESC
+            LIMIT 49
+        """, (symbol,))
+        rows = cur.fetchall()
+
+        if not rows or len(rows) < 49:
+            print(f"❌ Недостаточно данных для расчёта канала по {symbol}", flush=True)
+            return None
+
+        rows.reverse()
+        closes = [row[1] for row in rows]
+        closes.append(latest_price)
+
+        X = np.arange(len(closes))
+        Y = np.array(closes)
+
+        avgX = np.mean(X)
+        avgY = np.mean(Y)
+        covXY = np.mean((X - avgX) * (Y - avgY))
+        varX = np.mean((X - avgX) ** 2)
+        slope = covXY / varX
+        intercept = avgY - slope * avgX
+
+        expected = slope * X + intercept
+        stdDev = np.std(Y - expected)
+        width = 2 * stdDev
+        mid = expected[-1]
+
+        width_percent = (width / mid) * 100 if mid != 0 else 0
+
+        return {
+            "slope": slope,
+            "width_percent": width_percent,
+            "mid": mid,
+            "stdDev": stdDev,
+        }
+
+    except Exception as e:
+        print(f"❌ Ошибка calculate_channel: {e}", flush=True)
+        return None
 # === Получение ATR по тикеру из таблицы candles_5m ===
 def get_atr(symbol, period=14):
     try:
@@ -306,9 +366,10 @@ def check_volume_limit(strategy_name):
         print(msg, flush=True)
         entrylog.append(msg)
         return False
-# === Получение направления канала по тикеру ===
+# === Получение направления канала на основе расчёта регрессии ===
 def get_channel_direction(symbol):
     try:
+        # Берём цену закрытия последней свечи
         conn = psycopg2.connect(
             dbname=PG_NAME,
             user=PG_USER,
@@ -318,20 +379,28 @@ def get_channel_direction(symbol):
         )
         cur = conn.cursor()
         cur.execute("""
-            SELECT slope
-            FROM live_channels
+            SELECT close
+            FROM candles_5m
             WHERE symbol = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
         """, (symbol,))
         row = cur.fetchone()
         conn.close()
 
         if not row:
-            msg = f"❌ Нет данных о канале для {symbol}"
+            msg = f"❌ Нет цены закрытия для {symbol}"
             print(msg, flush=True)
             entrylog.append(msg)
             return "неизвестно"
 
-        slope = row[0]
+        latest_price = row[0]
+        result = calculate_channel(symbol, latest_price)
+
+        if not result:
+            return "неизвестно"
+
+        slope = result["slope"]
 
         if slope > 0.01:
             direction = "восходящий ↗️"
@@ -350,41 +419,13 @@ def get_channel_direction(symbol):
         print(msg, flush=True)
         entrylog.append(msg)
         return "неизвестно"
-# === Проверка: допустимо ли направление канала для данного сигнала ===
-def check_direction_allowed(direction, action):
-    try:
-        if action == "BUYORDER":
-            allowed = direction in ("восходящий ↗️", "флет ➡️")
-        elif action == "SELLORDER":
-            allowed = direction in ("нисходящий ↘️", "флет ➡️")
-        else:
-            msg = f"❌ Неизвестный тип сигнала: {action}"
-            print(msg, flush=True)
-            entrylog.append(msg)
-            return False
-
-        if allowed:
-            msg = f"✅ Направление канала допустимо: {direction} для сигнала {action}"
-        else:
-            msg = f"❌ Недопустимое направление канала: {direction} для сигнала {action}"
-
-        print(msg, flush=True)
-        entrylog.append(msg)
-        return allowed
-
-    except Exception as e:
-        msg = f"❌ Ошибка check_direction_allowed: {e}"
-        print(msg, flush=True)
-        entrylog.append(msg)
-        return False
-# === Проверка: ширина канала должна быть ≥ 3 × ATR (% от цены) ===
+# === Проверка: ширина канала ≥ 3 × ATR на момент входа ===
 def check_channel_width_vs_atr(symbol):
     try:
-        atr = get_atr(symbol, period=14)
+        atr = get_atr(symbol)
         if atr is None:
             return False
 
-        # Получаем ширину канала и цену закрытия последней свечи
         conn = psycopg2.connect(
             dbname=PG_NAME,
             user=PG_USER,
@@ -393,14 +434,6 @@ def check_channel_width_vs_atr(symbol):
             port=PG_PORT
         )
         cur = conn.cursor()
-
-        cur.execute("""
-            SELECT width_percent
-            FROM live_channels
-            WHERE symbol = %s
-        """, (symbol,))
-        width_row = cur.fetchone()
-
         cur.execute("""
             SELECT close
             FROM candles_5m
@@ -408,32 +441,37 @@ def check_channel_width_vs_atr(symbol):
             ORDER BY timestamp DESC
             LIMIT 1
         """, (symbol,))
-        close_row = cur.fetchone()
-
+        row = cur.fetchone()
         conn.close()
 
-        if not width_row or not close_row:
-            msg = f"❌ Нет данных ширины канала или цены закрытия по {symbol}"
+        if not row:
+            msg = f"❌ Нет цены закрытия для {symbol}"
             print(msg, flush=True)
             entrylog.append(msg)
             return False
 
-        width = width_row[0]
-        close_price = close_row[0]
+        latest_price = row[0]
+        result = calculate_channel(symbol, latest_price)
 
-        atr_percent = (atr / close_price) * 100
+        if not result:
+            return False
+
+        width_percent = result["width_percent"]
+        slope = result["slope"]
+        mid = result["mid"]
+        atr_percent = (atr / mid) * 100 if mid else 0
         threshold = 3 * atr_percent
 
-        if width >= threshold:
-            msg = f"✅ Ширина канала {width:.2f}% ≥ 3×ATR ({threshold:.2f}%)"
-            result = True
+        if width_percent >= threshold:
+            msg = f"✅ Ширина канала {width_percent:.2f}% ≥ 3×ATR ({threshold:.2f}%)"
+            result_ok = True
         else:
-            msg = f"❌ Ширина канала {width:.2f}% < 3×ATR ({threshold:.2f}%)"
-            result = False
+            msg = f"❌ Ширина канала {width_percent:.2f}% < 3×ATR ({threshold:.2f}%)"
+            result_ok = False
 
         print(msg, flush=True)
         entrylog.append(msg)
-        return result
+        return result_ok
 
     except Exception as e:
         msg = f"❌ Ошибка check_channel_width_vs_atr: {e}"

@@ -28,27 +28,28 @@ def run_executor():
             )
             cur = conn.cursor()
 
-            # 📥 Чтение последних сигналов типа action
+            # 📥 Чтение последних action-сигналов за последнюю минуту
             cur.execute("""
                 SELECT timestamp, symbol, action
                 FROM signals
                 WHERE action IN ('BUY', 'SELL')
+                  AND timestamp >= now() - interval '1 minute'
                 ORDER BY timestamp DESC
-                LIMIT 10
             """)
             signals = cur.fetchall()
             conn.close()
 
+            if not signals:
+                print("⏱ Нет свежих сигналов (за последнюю минуту)", flush=True)
+
             for ts, symbol, action in signals:
                 print(f"[{ts}] 🛰️ {action} {symbol}", flush=True)
-
-                # 🔧 Здесь будет запуск логики стратегии (например, channel_vilarso)
-                # TODO: реализовать запуск стратегии
+                # TODO: запуск стратегии channel_vilarso
 
         except Exception as e:
             print("❌ Ошибка в trade_executor:", e, flush=True)
 
-        time.sleep(10)  # ⏱ Проверка каждые 10 секунд
+        time.sleep(10)
 
 if __name__ == "__main__":
     run_executor()

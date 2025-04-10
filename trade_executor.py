@@ -13,7 +13,7 @@ PG_USER = os.environ.get("PG_USER")
 PG_PASSWORD = os.environ.get("PG_PASSWORD")
 
 # === СТРАТЕГИЯ: channel_vilarso ===
-def run_channel_vilarso(symbol, action, signal_time):
+def run_channel_vilarso(symbol, action, signal_time, strategy_id):
     print(f"🧠 Запуск стратегии channel_vilarso для {symbol} @ {signal_time}", flush=True)
     global entrylog
     entrylog = []
@@ -28,7 +28,7 @@ def run_channel_vilarso(symbol, action, signal_time):
     if not check_control_signal(symbol, required_control, interval_start, interval_end, signal_time):
         return
 
-    if not check_trade_permission(symbol):
+    if not check_trade_permission(symbol, strategy_id):
         return
 
     if not check_strategy_permission("channel_vilarso"):

@@ -46,6 +46,84 @@ def run_channel_vilarso(symbol, action, signal_time):
 
     execute_trade(symbol, action, "channel_vilarso")
     print(f"✅ Сделка открыта по {symbol}", flush=True)
+# === ПОТОК @trade для получения онлайн-цен Binance ===
+import threading
+import websocket
+import json
+
+latest_price = {}
+
+def load_symbols_from_db():
+    try:
+        conn = psycopg2.connect(
+            dbname=PG_NAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM symbols")
+        rows = cur.fetchall()
+        conn.close()
+        return [row[0].lower() for row in rows]
+    except Exception as e:
+        print(f"❌ Ошибка при загрузке символов: {e}", flush=True)
+        return []
+
+def start_trade_stream():
+    def run():
+        subscribed = set()
+        ws = None
+
+        while True:
+            try:
+                symbols = load_symbols_from_db()
+                new_symbols = [s for s in symbols if s not in subscribed]
+
+                if new_symbols or ws is None:
+                    if ws:
+                        ws.close()
+                        time.sleep(1)
+
+                    streams = "/".join([f"{s}@trade" for s in symbols])
+                    url = f"wss://stream.binance.com:9443/stream?streams={streams}"
+                    print(f"🔌 Подключение к потоку: {url}", flush=True)
+
+                    def on_message(wsapp, message):
+                        try:
+                            data = json.loads(message)
+                            stream = data.get("stream", "")
+                            if not stream.endswith("@trade"):
+                                return
+                            symbol = stream.replace("@trade", "").upper()
+                            price = float(data["data"]["p"])
+                            latest_price[symbol] = price
+                        except Exception as e:
+                            print(f"Ошибка обработки сообщения: {e}", flush=True)
+
+                    def on_error(wsapp, error):
+                        print(f"WebSocket error: {error}", flush=True)
+
+                    def on_close(wsapp, close_status_code, close_msg):
+                        print("🔌 WebSocket закрыт, переподключение...", flush=True)
+
+                    def on_open(wsapp):
+                        print("🟢 WebSocket открыт", flush=True)
+
+                    ws = websocket.WebSocketApp(url, on_message=on_message,
+                                                on_error=on_error, on_close=on_close, on_open=on_open)
+
+                    threading.Thread(target=ws.run_forever, daemon=True).start()
+                    subscribed = set(symbols)
+
+                time.sleep(30)
+
+            except Exception as e:
+                print(f"Ошибка в trade-потоке: {e}", flush=True)
+                time.sleep(10)
+
+    threading.Thread(target=run, daemon=True).start()
 # === Расчёт канала по логике TV (49 свечей + latest_price) ===
 def calculate_channel(symbol, latest_price, conn=None):
     try:
@@ -159,7 +237,43 @@ def get_atr(symbol, period=14):
         print(msg, flush=True)
         entrylog.append(msg)
         return None
+# === Расчёт SL и TP уровней стратегии channel_vilarso с логированием ===
+def calculate_sl_tp(entry_price, atr, direction="long"):
+    """
+    Расчёт SL и 6 TP уровней в соответствии со стратегией channel_vilarso
+    :param entry_price: цена входа
+    :param atr: значение ATR на момент входа
+    :param direction: "long" или "short"
+    :return: (stop_loss_price, take_profits: list)
+    """
+    take_profits = []
 
+    if direction == "long":
+        stop_loss_price = entry_price - 1.5 * atr
+        entrylog.append(f"✅ SL: {stop_loss_price:.5f}")
+
+        take_profits.append({"tp_percent": 50, "tp_price": entry_price + 2.0 * atr, "new_sl": entry_price})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price + 2.2 * atr, "new_sl": entry_price + 1.0 * atr})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price + 2.4 * atr, "new_sl": entry_price + 1.2 * atr})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price + 2.6 * atr, "new_sl": entry_price + 1.4 * atr})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price + 2.8 * atr, "new_sl": entry_price + 1.6 * atr})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price + 3.0 * atr, "new_sl": entry_price + 1.8 * atr})
+    else:  # short
+        stop_loss_price = entry_price + 1.5 * atr
+        entrylog.append(f"✅ SL: {stop_loss_price:.5f}")
+
+        take_profits.append({"tp_percent": 50, "tp_price": entry_price - 2.0 * atr, "new_sl": entry_price})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price - 2.2 * atr, "new_sl": entry_price - 1.0 * atr})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price - 2.4 * atr, "new_sl": entry_price - 1.2 * atr})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price - 2.6 * atr, "new_sl": entry_price - 1.4 * atr})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price - 2.8 * atr, "new_sl": entry_price - 1.6 * atr})
+        take_profits.append({"tp_percent": 10, "tp_price": entry_price - 3.0 * atr, "new_sl": entry_price - 1.8 * atr})
+
+    # Логируем TP уровни
+    for i, tp in enumerate(take_profits, start=1):
+        entrylog.append(f"✅ TP{i}: {tp['tp_price']:.5f} ({tp['tp_percent']}%), SL → {tp['new_sl']:.5f}")
+
+    return stop_loss_price, take_profits
 # === Проверка: есть ли активная сделка по тикеру ===
 def check_open_trade_exists(symbol):
     try:
@@ -526,4 +640,5 @@ def run_executor():
         time.sleep(10)
 
 if __name__ == "__main__":
+    start_trade_stream()
     run_executor()

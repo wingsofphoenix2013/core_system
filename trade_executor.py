@@ -533,6 +533,33 @@ def get_channel_direction(symbol):
         print(msg, flush=True)
         entrylog.append(msg)
         return "неизвестно"
+# === Проверка: допустимо ли направление канала для данного сигнала ===
+def check_direction_allowed(direction, action):
+    try:
+        if action == "BUYORDER":
+            allowed = direction in ("восходящий ↗️", "флет ➡️")
+        elif action == "SELLORDER":
+            allowed = direction in ("нисходящий ↘️", "флет ➡️")
+        else:
+            msg = f"❌ Неизвестный тип сигнала: {action}"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        if allowed:
+            msg = f"✅ Направление канала допустимо: {direction} для сигнала {action}"
+        else:
+            msg = f"❌ Недопустимое направление канала: {direction} для сигнала {action}"
+
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return allowed
+
+    except Exception as e:
+        msg = f"❌ Ошибка check_direction_allowed: {e}"
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return False
 # === Проверка: ширина канала ≥ 3 × ATR на момент входа ===
 def check_channel_width_vs_atr(symbol):
     try:

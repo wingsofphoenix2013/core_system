@@ -1072,6 +1072,18 @@ def toggle_strategy_trade(name):
         return jsonify({"name": name, "new_status": new_status})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+# TEMP
+from flask import Response
+
+@app.route("/backup/trade_executor")
+def backup_trade_executor():
+    try:
+        with open("trade_executor.py", "r") as f:
+            content = f.read()
+        return Response(content, mimetype="text/plain")
+    except Exception as e:
+        return Response(f"Ошибка: {e}", status=500, mimetype="text/plain")
+
 # Запуск сервера + инициализация
 if __name__ == "__main__":
     init_db()

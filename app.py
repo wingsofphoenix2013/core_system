@@ -1078,7 +1078,7 @@ from flask import Response
 @app.route("/backup/trade_executor")
 def backup_trade_executor():
     try:
-        with open("trade_executor.py", "r") as f:
+        with open("./trade_executor.py", "r") as f:
             content = f.read()
         return Response(content, mimetype="text/plain")
     except Exception as e:

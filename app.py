@@ -553,67 +553,69 @@ def latest_prices():
     return html
 # === МОДУЛЬ 10: API live-channel — расчёт по логике TV (49 свечей + latest_price) ===
 
+from flask import request
+from math import sqrt, atan, degrees
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 @app.route("/api/live-channel/<symbol>")
 def api_live_channel(symbol):
-    from collections import defaultdict
-    from math import sqrt, atan, degrees
-    from datetime import datetime, timedelta
-
+    # 🔧 Подготовка параметров
     symbol = symbol.lower()
     interval_minutes = 5
     now = datetime.utcnow()
     start_minute = now.minute - now.minute % interval_minutes
     current_start = now.replace(minute=start_minute, second=0, microsecond=0)
 
+    # ⚙️ Загрузка конфигурации канала
     try:
         config = load_channel_config()
         length = config.get("length", 50)
         deviation = config.get("deviation", 2.0)
 
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT timestamp, open, high, low, close FROM prices WHERE symbol = ? ORDER BY timestamp ASC", (symbol,))
-        rows = c.fetchall()
-        c.execute("SELECT timestamp, action FROM signals WHERE symbol = ?", (symbol.upper(),))
-        signal_rows = [(datetime.fromisoformat(r[0]), r[1].upper()) for r in c.fetchall()]
+        # 📥 Получение M5-свечей из PostgreSQL
+        conn = psycopg2.connect(
+            dbname=os.environ.get("PG_NAME"),
+            user=os.environ.get("PG_USER"),
+            password=os.environ.get("PG_PASSWORD"),
+            host=os.environ.get("PG_HOST"),
+            port=os.environ.get("PG_PORT", 5432)
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT timestamp, open, high, low, close
+            FROM candles_5m
+            WHERE symbol = %s
+            ORDER BY timestamp ASC
+        """, (symbol,))
+        rows = cur.fetchall()
+
+        # 📥 Получение сигналов для текущего интервала
+        cur.execute("""
+            SELECT timestamp, action
+            FROM signals
+            WHERE symbol = %s
+        """, (symbol.upper(),))
+        signal_rows = [(r[0], r[1].upper()) for r in cur.fetchall()]
         conn.close()
     except Exception as e:
         return jsonify({"error": f"Ошибка БД: {str(e)}"})
 
-    # 📊 Группировка в 5-минутные свечи
-    grouped = defaultdict(list)
-    for ts_str, o, h, l, c_ in rows:
-        try:
-            ts = datetime.fromisoformat(ts_str)
-        except:
-            continue
-        minute = (ts.minute // interval_minutes) * interval_minutes
-        key = ts.replace(minute=minute, second=0, microsecond=0)
-        grouped[key].append((float(o), float(h), float(l), float(c_)))
-
-    # 📈 Построение списка свечей
-    candles = []
-    for ts in sorted(grouped.keys()):
-        bucket = grouped[ts]
-        if bucket:
-            o = bucket[0][0]
-            h = max(x[1] for x in bucket)
-            l = min(x[2] for x in bucket)
-            c_ = bucket[-1][3]
-            candles.append((ts, {"open": o, "high": h, "low": l, "close": c_}))
-
-    if len(candles) < length - 1:
+    # ❗ Недостаточно данных для расчёта канала
+    if len(rows) < length - 1:
         return jsonify({"error": "Недостаточно данных"})
 
-    # 📉 Текущая цена
+    # 📉 Получение текущей цены
     current_price = latest_price.get(symbol)
     if not current_price:
         return jsonify({"error": "Нет текущей цены"})
 
-    # 📊 Реальные цены (для построения канала)
-    closes = [c[1]["close"] for c in candles[-(length - 1):]]
+    # 📊 Формирование списка значений закрытия
+    closes = [float(row[4]) for row in rows[-(length - 1):]]
     closes.append(current_price)
 
+    # 🧠 Расчёт линейной регрессии (наклон и сдвиг)
     x = list(range(length))
     avgX = sum(x) / length
     mid = sum(closes) / length
@@ -622,11 +624,8 @@ def api_live_channel(symbol):
     slope = covXY / varX
     intercept = mid - slope * avgX
 
-    # 📏 Ширина и отклонения
-    dev = 0.0
-    for i in range(length):
-        expected = slope * i + intercept
-        dev += (closes[i] - expected) ** 2
+    # 📏 Расчёт стандартного отклонения и ширины канала
+    dev = sum((closes[i] - (slope * i + intercept)) ** 2 for i in range(length))
     stdDev = sqrt(dev / length)
 
     y_start = intercept
@@ -645,7 +644,7 @@ def api_live_channel(symbol):
     norm_slope = norm_covXY / norm_varX
     angle_deg = round(degrees(atan(norm_slope)), 2)
 
-    # 🧭 Направление канала
+    # 🧭 Определение направления канала по углу
     if angle_deg > 0.01:
         direction = "восходящий ↗️"
         color = "green"
@@ -656,20 +655,22 @@ def api_live_channel(symbol):
         direction = "флет ➡️"
         color = "black"
 
-    # 📍 Актуальный сигнал
+    # 📍 Поиск сигнала в текущем интервале
     signal = ""
     for st, act in signal_rows:
-        if current_start <= st < current_start + timedelta(minutes=interval_minutes):
+        ts = datetime.fromisoformat(st)
+        if current_start <= ts < current_start + timedelta(minutes=interval_minutes):
             signal = act
             break
 
-    # 🕓 Локальное время
+    # 🕓 Преобразование времени в Europe/Kyiv
     local_time = now.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Europe/Kyiv"))
 
+    # 📤 Возврат результата
     return jsonify({
         "time": now.strftime("%Y-%m-%d %H:%M:%S"),
         "local_time": local_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "open_price": round(candles[-1][1]["open"], 5),
+        "open_price": float(rows[-1][1]),
         "current_price": round(current_price, 5),
         "direction": direction,
         "direction_color": color,

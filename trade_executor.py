@@ -13,7 +13,7 @@ PG_USER = os.environ.get("PG_USER")
 PG_PASSWORD = os.environ.get("PG_PASSWORD")
 
 # === СТРАТЕГИЯ: channel_vilarso ===
-def run_channel_vilarso(symbol, action, signal_time, strategy_id):
+def run_channel_vilarso(symbol, action, signal_time):
     print(f"🧠 Запуск стратегии channel_vilarso для {symbol} @ {signal_time}", flush=True)
     global entrylog
     entrylog = []
@@ -80,9 +80,45 @@ def check_open_trade_exists(symbol):
         print(msg, flush=True)
         entrylog.append(msg)
         return True
+# === Проверка: был ли сигнал BUYZONE/SELLZONE ранее в пределах свечи ===
+def check_control_signal(symbol, control, start, end, action_time):
+    try:
+        conn = psycopg2.connect(
+            dbname=PG_NAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT timestamp FROM signals
+            WHERE symbol = %s AND type = 'control' AND action = %s
+              AND timestamp >= %s AND timestamp < %s
+              AND timestamp < %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (symbol, control, start, end, action_time))
+        row = cur.fetchone()
+        conn.close()
+
+        if row:
+            msg = f"✅ Найден сигнал {control} в интервале {start}–{end}, до {action_time}"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return True
+        else:
+            msg = f"❌ Сигнал {control} не найден в интервале {start}–{end} до {action_time}"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+    except Exception as e:
+        msg = f"❌ Ошибка check_control_signal: {e}"
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return False
 
 # === Заглушки остальных функций ===
-def check_control_signal(symbol, control, start, end, action_time): entrylog.append("✅ control: ok"); return True
 def check_trade_permission(symbol): entrylog.append("✅ symbol permission ok"); return True
 def check_strategy_permission(strategy): entrylog.append("✅ strategy permission ok"); return True
 def check_volume_limit(strategy): entrylog.append("✅ volume check ok"); return True
@@ -106,7 +142,7 @@ def run_executor():
             cur = conn.cursor()
 
             cur.execute("""
-                SELECT timestamp, symbol, action, strategy_id
+                SELECT timestamp, symbol, action
                 FROM signals
                 WHERE type = 'action'
                   AND processed = false
@@ -115,9 +151,9 @@ def run_executor():
             """)
             signals = cur.fetchall()
 
-            for ts, symbol, action, strategy_id in signals:
+            for ts, symbol, action in signals:
                 print(f"[{ts}] 🛰️ {action} {symbol}", flush=True)
-                run_channel_vilarso(symbol, action, ts, strategy_id)
+                run_channel_vilarso(symbol, action, ts)
 
                 cur.execute("""
                     UPDATE signals

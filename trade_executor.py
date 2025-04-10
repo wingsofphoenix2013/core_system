@@ -178,7 +178,7 @@ def check_direction_allowed(direction, action): entrylog.append("✅ напра�
 def check_channel_width_vs_atr(symbol): entrylog.append("✅ ширина канала >= 3*ATR"); return True
 def execute_trade(symbol, action, strategy): entrylog.append("✅ trade executed")
 
-# === Основной цикл воркера ===
+# === Основной цикл воркера с фильтрацией сигналов по стратегиям ===
 def run_executor():
     print("🚀 Trade Executor запущен", flush=True)
     while True:
@@ -192,31 +192,61 @@ def run_executor():
             )
             cur = conn.cursor()
 
+            # Получаем все необработанные сигналы
             cur.execute("""
-                SELECT timestamp, symbol, action, strategy_id
+                SELECT id, timestamp, symbol, action, type
                 FROM signals
-                WHERE type = 'action'
-                  AND processed = false
+                WHERE processed = false
                   AND timestamp >= now() - interval '1 minute'
                 ORDER BY timestamp DESC
             """)
             signals = cur.fetchall()
 
-            for ts, symbol, action, strategy_id in signals:
-                print(f"[{ts}] 🛰️ {action} {symbol}", flush=True)
-                run_channel_vilarso(symbol, action, ts, strategy_id)
+            # Получаем все активные стратегии
+            cur.execute("""
+                SELECT id, name, uses_buyorder, uses_sellorder, uses_buyzone, uses_sellzone, uses_info
+                FROM strategy
+                WHERE tradepermission = 'enabled'
+            """)
+            strategies = cur.fetchall()
 
+            for signal_id, ts, symbol, action, signal_type in signals:
+                print(f"[{ts}] 🛰️ {action} {symbol} ({signal_type})", flush=True)
+
+                for strategy in strategies:
+                    strategy_id, name, use_buy, use_sell, use_zone_buy, use_zone_sell, use_info = strategy
+
+                    # Обрабатываются только сигналы типа action
+                    if signal_type != 'action':
+                        continue
+
+                    if action == 'BUYORDER' and use_buy:
+                        run_channel_vilarso(symbol, action, ts, strategy_id)
+
+                    elif action == 'SELLORDER' and use_sell:
+                        run_channel_vilarso(symbol, action, ts, strategy_id)
+
+                    elif action == 'BUYZONE' and use_zone_buy:
+                        run_channel_vilarso(symbol, action, ts, strategy_id)
+
+                    elif action == 'SELLZONE' and use_zone_sell:
+                        run_channel_vilarso(symbol, action, ts, strategy_id)
+
+                    elif action == 'INFO' and use_info:
+                        run_channel_vilarso(symbol, action, ts, strategy_id)
+
+                # Сигнал помечается как обработанный один раз
                 cur.execute("""
                     UPDATE signals
                     SET processed = true
-                    WHERE symbol = %s AND action = %s AND timestamp = %s
-                """, (symbol, action, ts))
+                    WHERE id = %s
+                """, (signal_id,))
 
             conn.commit()
             conn.close()
 
             if not signals:
-                print("⏱ Нет свежих сигналов (type='action')", flush=True)
+                print("⏱ Нет свежих сигналов", flush=True)
 
         except Exception as e:
             print("❌ Ошибка в trade_executor:", e, flush=True)

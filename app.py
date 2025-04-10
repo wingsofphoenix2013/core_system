@@ -562,7 +562,7 @@ from zoneinfo import ZoneInfo
 @app.route("/api/live-channel/<symbol>")
 def api_live_channel(symbol):
     # 🔧 Подготовка параметров
-    symbol = symbol.lower()
+    symbol = symbol.upper()
     interval_minutes = 5
     now = datetime.utcnow()
     start_minute = now.minute - now.minute % interval_minutes
@@ -596,7 +596,7 @@ def api_live_channel(symbol):
             SELECT timestamp, action
             FROM signals
             WHERE symbol = %s
-        """, (symbol.upper(),))
+        """, (symbol,))
         signal_rows = [(r[0], r[1].upper()) for r in cur.fetchall()]
         conn.close()
     except Exception as e:

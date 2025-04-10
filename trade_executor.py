@@ -12,7 +12,7 @@ PG_NAME = os.environ.get("PG_NAME")
 PG_USER = os.environ.get("PG_USER")
 PG_PASSWORD = os.environ.get("PG_PASSWORD")
 
-# === СТРАТЕГИЯ: channel_vilarso ===
+# === СТРАТЕГИЯ: channel_vilarso обновленая  ===
 def run_channel_vilarso(symbol, action, signal_time, strategy_id):
     print(f"🧠 Запуск стратегии channel_vilarso для {symbol} @ {signal_time}", flush=True)
     global entrylog

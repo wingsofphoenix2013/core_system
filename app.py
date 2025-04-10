@@ -555,13 +555,12 @@ def latest_prices():
 
 from flask import request
 from math import sqrt, atan, degrees
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 @app.route("/api/live-channel/<symbol>")
 def api_live_channel(symbol):
-    # 🔧 Приведение к верхнему регистру для работы с PostgreSQL
+    # 🔧 Приведение к верхнему регистру для PostgreSQL
     symbol_pg = symbol.upper()
     interval_minutes = 5
     now = datetime.utcnow()
@@ -569,12 +568,12 @@ def api_live_channel(symbol):
     current_start = now.replace(minute=start_minute, second=0, microsecond=0)
 
     try:
-        # ⚙️ Загрузка конфигурации канала
+        # ⚙️ Загрузка параметров расчёта канала
         config = load_channel_config()
         length = config.get("length", 50)
         deviation = config.get("deviation", 2.0)
 
-        # 📥 Получение M5-свечей из PostgreSQL
+        # 📥 Подключение к PostgreSQL и извлечение данных
         conn = psycopg2.connect(
             dbname=os.environ.get("PG_NAME"),
             user=os.environ.get("PG_USER"),
@@ -591,7 +590,7 @@ def api_live_channel(symbol):
         """, (symbol_pg,))
         rows = cur.fetchall()
 
-        # 📥 Получение сигналов для текущего интервала
+        # 📥 Получение сигналов
         cur.execute("""
             SELECT timestamp, action
             FROM signals
@@ -602,20 +601,20 @@ def api_live_channel(symbol):
     except Exception as e:
         return jsonify({"error": f"Ошибка БД: {str(e)}"})
 
-    # ❗ Недостаточно данных для расчёта канала
+    # ❗ Проверка на минимальное количество свечей
     if len(rows) < length - 1:
         return jsonify({"error": "Недостаточно данных"})
 
-    # 📉 Получение текущей цены из latest_price (в нижнем регистре)
+    # 📉 Получение текущей цены из latest_price
     current_price = latest_price.get(symbol.lower())
     if not current_price:
         return jsonify({"error": "Нет текущей цены"})
 
-    # 📊 Формирование списка значений закрытия
+    # 📊 Последние N-1 закрытий + текущая цена
     closes = [float(row[4]) for row in rows[-(length - 1):]]
     closes.append(current_price)
 
-    # 🧠 Расчёт линейной регрессии (наклон и сдвиг)
+    # 🧠 Расчёт наклона и сдвига канала (линейная регрессия)
     x = list(range(length))
     avgX = sum(x) / length
     mid = sum(closes) / length
@@ -624,7 +623,7 @@ def api_live_channel(symbol):
     slope = covXY / varX
     intercept = mid - slope * avgX
 
-    # 📏 Расчёт стандартного отклонения и ширины канала
+    # 📏 Стандартное отклонение и ширина канала
     dev = sum((closes[i] - (slope * i + intercept)) ** 2 for i in range(length))
     stdDev = sqrt(dev / length)
 
@@ -635,7 +634,7 @@ def api_live_channel(symbol):
     lower = center - deviation * stdDev
     width_percent = round((upper - lower) / center * 100, 2)
 
-    # 🧠 Вставка нормализованных данных ТОЛЬКО для расчёта угла
+    # 🧠 Нормализованные данные для угла наклона
     base_price = closes[0] if closes[0] != 0 else 1
     norm_closes = [c / base_price for c in closes]
     norm_mid = sum(norm_closes) / length
@@ -644,7 +643,7 @@ def api_live_channel(symbol):
     norm_slope = norm_covXY / norm_varX
     angle_deg = round(degrees(atan(norm_slope)), 2)
 
-    # 🧭 Определение направления канала по углу
+    # 🧭 Определение направления
     if angle_deg > 0.01:
         direction = "восходящий ↗️"
         color = "green"
@@ -655,18 +654,17 @@ def api_live_channel(symbol):
         direction = "флет ➡️"
         color = "black"
 
-    # 📍 Поиск сигнала в текущем интервале
+    # 📍 Актуальный сигнал (в интервале)
     signal = ""
     for st, act in signal_rows:
-        ts = datetime.fromisoformat(st)
+        ts = st  # PostgreSQL уже возвращает datetime
         if current_start <= ts < current_start + timedelta(minutes=interval_minutes):
             signal = act
             break
 
-    # 🕓 Преобразование времени в Europe/Kyiv
+    # 🕓 Преобразование UTC → Europe/Kyiv
     local_time = now.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Europe/Kyiv"))
 
-    # 📤 Возврат результата
     return jsonify({
         "time": now.strftime("%Y-%m-%d %H:%M:%S"),
         "local_time": local_time.strftime("%Y-%m-%d %H:%M:%S"),

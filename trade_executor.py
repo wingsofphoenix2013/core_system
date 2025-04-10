@@ -193,7 +193,7 @@ def run_executor():
             cur = conn.cursor()
 
             cur.execute("""
-                SELECT timestamp, symbol, action
+                SELECT timestamp, symbol, action, strategy_id
                 FROM signals
                 WHERE type = 'action'
                   AND processed = false
@@ -202,9 +202,9 @@ def run_executor():
             """)
             signals = cur.fetchall()
 
-            for ts, symbol, action in signals:
+            for ts, symbol, action, strategy_id in signals:
                 print(f"[{ts}] 🛰️ {action} {symbol}", flush=True)
-                run_channel_vilarso(symbol, action, ts)
+                run_channel_vilarso(symbol, action, ts, strategy_id)
 
                 cur.execute("""
                     UPDATE signals

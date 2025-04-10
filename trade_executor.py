@@ -117,9 +117,48 @@ def check_control_signal(symbol, control, start, end, action_time):
         print(msg, flush=True)
         entrylog.append(msg)
         return False
+# === Проверка: разрешена ли торговля по тикеру ===
+def check_trade_permission(symbol):
+    try:
+        conn = psycopg2.connect(
+            dbname=PG_NAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT tradepermission
+            FROM symbols
+            WHERE name = %s
+        """, (symbol,))
+        row = cur.fetchone()
+        conn.close()
 
+        if not row:
+            msg = f"❌ Тикер {symbol} не найден в таблице symbols"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        if row[0] != 'enabled':
+            msg = f"❌ Торговля по тикеру {symbol} запрещена (tradepermission = '{row[0]}')"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        msg = f"✅ Торговля по тикеру {symbol} разрешена"
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return True
+
+    except Exception as e:
+        msg = f"❌ Ошибка check_trade_permission: {e}"
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return False
 # === Заглушки остальных функций ===
-def check_trade_permission(symbol): entrylog.append("✅ symbol permission ok"); return True
 def check_strategy_permission(strategy): entrylog.append("✅ strategy permission ok"); return True
 def check_volume_limit(strategy): entrylog.append("✅ volume check ok"); return True
 def get_channel_direction(symbol): return "восходящий ↗️"

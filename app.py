@@ -561,15 +561,15 @@ from zoneinfo import ZoneInfo
 
 @app.route("/api/live-channel/<symbol>")
 def api_live_channel(symbol):
-    # 🔧 Подготовка параметров
-    symbol = symbol.upper()
+    # 🔧 Приведение к верхнему регистру для работы с PostgreSQL
+    symbol_pg = symbol.upper()
     interval_minutes = 5
     now = datetime.utcnow()
     start_minute = now.minute - now.minute % interval_minutes
     current_start = now.replace(minute=start_minute, second=0, microsecond=0)
 
-    # ⚙️ Загрузка конфигурации канала
     try:
+        # ⚙️ Загрузка конфигурации канала
         config = load_channel_config()
         length = config.get("length", 50)
         deviation = config.get("deviation", 2.0)
@@ -588,7 +588,7 @@ def api_live_channel(symbol):
             FROM candles_5m
             WHERE symbol = %s
             ORDER BY timestamp ASC
-        """, (symbol,))
+        """, (symbol_pg,))
         rows = cur.fetchall()
 
         # 📥 Получение сигналов для текущего интервала
@@ -596,7 +596,7 @@ def api_live_channel(symbol):
             SELECT timestamp, action
             FROM signals
             WHERE symbol = %s
-        """, (symbol,))
+        """, (symbol_pg,))
         signal_rows = [(r[0], r[1].upper()) for r in cur.fetchall()]
         conn.close()
     except Exception as e:
@@ -606,8 +606,8 @@ def api_live_channel(symbol):
     if len(rows) < length - 1:
         return jsonify({"error": "Недостаточно данных"})
 
-    # 📉 Получение текущей цены
-    current_price = latest_price.get(symbol)
+    # 📉 Получение текущей цены из latest_price (в нижнем регистре)
+    current_price = latest_price.get(symbol.lower())
     if not current_price:
         return jsonify({"error": "Нет текущей цены"})
 

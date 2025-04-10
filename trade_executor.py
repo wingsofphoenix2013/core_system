@@ -158,8 +158,48 @@ def check_trade_permission(symbol):
         print(msg, flush=True)
         entrylog.append(msg)
         return False
+# === Проверка: разрешена ли стратегия ===
+def check_strategy_permission(strategy_name):
+    try:
+        conn = psycopg2.connect(
+            dbname=PG_NAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT tradepermission
+            FROM strategy
+            WHERE name = %s
+        """, (strategy_name,))
+        row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            msg = f"❌ Стратегия '{strategy_name}' не найдена в таблице strategy"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        if row[0] != 'enabled':
+            msg = f"❌ Стратегия '{strategy_name}' отключена (tradepermission = '{row[0]}')"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        msg = f"✅ Стратегия '{strategy_name}' разрешена"
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return True
+
+    except Exception as e:
+        msg = f"❌ Ошибка check_strategy_permission: {e}"
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return False
 # === Заглушки остальных функций ===
-def check_strategy_permission(strategy): entrylog.append("✅ strategy permission ok"); return True
 def check_volume_limit(strategy): entrylog.append("✅ volume check ok"); return True
 def get_channel_direction(symbol): return "восходящий ↗️"
 def check_direction_allowed(direction, action): entrylog.append("✅ направление канала допустимо"); return True

@@ -117,10 +117,61 @@ def check_control_signal(symbol, control, start, end, action_time):
         print(msg, flush=True)
         entrylog.append(msg)
         return False
+# === Проверка: разрешена ли торговля по тикеру и стратегии ===
+def check_trade_permission(symbol, strategy_id):
+    try:
+        conn = psycopg2.connect(
+            dbname=PG_NAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        cur = conn.cursor()
 
+        cur.execute("SELECT tradepermission FROM symbols WHERE name = %s", (symbol,))
+        symbol_row = cur.fetchone()
+
+        cur.execute("SELECT tradepermission FROM strategy WHERE id = %s", (strategy_id,))
+        strategy_row = cur.fetchone()
+
+        conn.close()
+
+        if not symbol_row:
+            msg = f"❌ Тикер {symbol} не найден в таблице symbols"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        if not strategy_row:
+            msg = f"❌ Стратегия {strategy_id} не найдена в таблице strategy"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        if symbol_row[0] != 'enabled':
+            msg = f"❌ Торговля по тикеру {symbol} запрещена"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        if strategy_row[0] != 'enabled':
+            msg = f"❌ Стратегия {strategy_id} отключена"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return False
+
+        msg = f"✅ Торговля по тикеру {symbol} и стратегии {strategy_id} разрешена"
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return True
+
+    except Exception as e:
+        msg = f"❌ Ошибка check_trade_permission: {e}"
+        print(msg, flush=True)
+        entrylog.append(msg)
+        return False
 # === Заглушки остальных функций ===
-def check_trade_permission(symbol): entrylog.append("✅ symbol permission ok"); return True
-def check_strategy_permission(strategy): entrylog.append("✅ strategy permission ok"); return True
 def check_volume_limit(strategy): entrylog.append("✅ volume check ok"); return True
 def get_channel_direction(symbol): return "восходящий ↗️"
 def check_direction_allowed(direction, action): entrylog.append("✅ направление канала допустимо"); return True

@@ -28,11 +28,11 @@ def run_executor():
             )
             cur = conn.cursor()
 
-            # 📥 Чтение последних action-сигналов за последнюю минуту
+            # 📥 Чтение последних сигналов типа action (любой action: BUY, BUYORDER, ...)
             cur.execute("""
                 SELECT timestamp, symbol, action
                 FROM signals
-                WHERE action IN ('BUY', 'SELL')
+                WHERE type = 'action'
                   AND timestamp >= now() - interval '1 minute'
                 ORDER BY timestamp DESC
             """)
@@ -40,7 +40,7 @@ def run_executor():
             conn.close()
 
             if not signals:
-                print("⏱ Нет свежих сигналов (за последнюю минуту)", flush=True)
+                print("⏱ Нет свежих сигналов (type='action')", flush=True)
 
             for ts, symbol, action in signals:
                 print(f"[{ts}] 🛰️ {action} {symbol}", flush=True)

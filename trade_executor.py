@@ -592,8 +592,95 @@ def check_channel_width_vs_atr(symbol):
         print(msg, flush=True)
         entrylog.append(msg)
         return False
-# === Заглушки остальных функций ===
-def execute_trade(symbol, action, strategy): entrylog.append("✅ trade executed")
+# === Открытие сделки и сохранение SL/TP в trades_sltp ===
+def execute_trade(symbol, action, strategy):
+    try:
+        entry_price = latest_price.get(symbol)
+        if entry_price is None:
+            msg = f"❌ Нет online-цены для {symbol} в latest_price"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            return
+
+        atr = get_atr(symbol)
+        if atr is None:
+            return
+
+        direction = "long" if action == "BUYORDER" else "short"
+
+        # Получаем параметры стратегии
+        conn = psycopg2.connect(
+            dbname=PG_NAME,
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT
+        )
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT size, leverage
+            FROM strategy
+            WHERE name = %s
+        """, (strategy,))
+        strat = cur.fetchone()
+        if not strat:
+            msg = f"❌ Стратегия {strategy} не найдена"
+            print(msg, flush=True)
+            entrylog.append(msg)
+            conn.close()
+            return
+
+        size, leverage = strat
+
+        # Расчёт SL и TP
+        sl_price, tp_list = calculate_sl_tp(entry_price, atr, direction)
+
+        # Вставка сделки
+        cur.execute("""
+            INSERT INTO trades (symbol, side, entry_time, entry_price, size, leverage, strategy, status, entrylog)
+            VALUES (%s, %s, now(), %s, %s, %s, %s, 'open', %s)
+            RETURNING id
+        """, (
+            symbol,
+            direction,
+            entry_price,
+            size,
+            leverage,
+            strategy,
+            "\n".join(entrylog)
+        ))
+        trade_id = cur.fetchone()[0]
+
+        # Сохраняем SL
+        cur.execute("""
+            INSERT INTO trades_sltp (trade_id, type, step, target_price, exit_percent, new_stop_loss)
+            VALUES (%s, 'sl', 0, %s, 100, NULL)
+        """, (trade_id, sl_price))
+
+        # Сохраняем TP уровни
+        for i, tp in enumerate(tp_list, start=1):
+            cur.execute("""
+                INSERT INTO trades_sltp (trade_id, type, step, target_price, exit_percent, new_stop_loss)
+                VALUES (%s, 'tp', %s, %s, %s, %s)
+            """, (
+                trade_id,
+                i,
+                tp["tp_price"],
+                tp["tp_percent"],
+                tp["new_sl"]
+            ))
+
+        conn.commit()
+        conn.close()
+
+        entrylog.append(f"✅ Сделка открыта по цене {entry_price:.5f}, trade_id={trade_id}")
+        print(f"✅ Сделка открыта по {symbol} (trade_id={trade_id})", flush=True)
+
+    except Exception as e:
+        msg = f"❌ Ошибка execute_trade: {e}"
+        print(msg, flush=True)
+        entrylog.append(msg)
 # === Основной цикл воркера ===
 def run_executor():
     print("🚀 Trade Executor запущен", flush=True)

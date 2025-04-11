@@ -635,7 +635,6 @@ def execute_trade(symbol, action, strategy):
 
         direction = "long" if action == "BUYORDER" else "short"
 
-        # Получаем параметры стратегии
         conn = psycopg2.connect(
             dbname=PG_NAME,
             user=PG_USER,
@@ -659,20 +658,21 @@ def execute_trade(symbol, action, strategy):
             return
 
         size, leverage = strat
+        position = size / entry_price  # количество монет в позиции
 
-        # Расчёт SL и TP
         sl_price, tp_list = calculate_sl_tp(entry_price, atr, direction)
 
         # Вставка сделки
         cur.execute("""
-            INSERT INTO trades (symbol, side, entry_time, entry_price, size, leverage, strategy, status, entrylog)
-            VALUES (%s, %s, now(), %s, %s, %s, %s, 'open', %s)
+            INSERT INTO trades (symbol, side, entry_time, entry_price, size, position, leverage, strategy, status, entrylog)
+            VALUES (%s, %s, now(), %s, %s, %s, %s, %s, 'open', %s)
             RETURNING id
         """, (
             symbol,
             direction,
             entry_price,
             size,
+            position,
             leverage,
             strategy,
             "\n".join(entrylog)
@@ -860,9 +860,6 @@ def run_executor():
 
             conn.commit()
             conn.close()
-
-            if not signals:
-                print("⏱ Нет свежих сигналов (type='action')", flush=True)
 
         except Exception as e:
             print("❌ Ошибка в trade_executor:", e, flush=True)

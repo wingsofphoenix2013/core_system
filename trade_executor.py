@@ -859,4 +859,5 @@ def run_executor():
 
 if __name__ == "__main__":
     start_trade_stream()
+    threading.Thread(target=monitor_active_trades, daemon=True).start()
     run_executor()

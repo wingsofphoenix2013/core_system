@@ -483,7 +483,6 @@ def check_volume_limit(strategy_name):
 # === Получение направления канала на основе расчёта регрессии ===
 def get_channel_direction(symbol):
     try:
-        # Берём цену закрытия последней свечи
         conn = psycopg2.connect(
             dbname=PG_NAME,
             user=PG_USER,
@@ -516,9 +515,9 @@ def get_channel_direction(symbol):
 
         slope = result["slope"]
 
-        if slope > 0.01:
+        if slope > 0.0075:
             direction = "восходящий ↗️"
-        elif slope < -0.01:
+        elif slope < -0.0075:
             direction = "нисходящий ↘️"
         else:
             direction = "флет ➡️"

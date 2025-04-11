@@ -723,13 +723,13 @@ def monitor_active_trades():
 
             # 1. Все открытые сделки
             cur.execute("""
-                SELECT id, symbol, side, entry_price
+                SELECT id, symbol, side, entry_price, size
                 FROM trades
                 WHERE status = 'open'
             """)
             trades = cur.fetchall()
 
-            for trade_id, symbol, side, entry_price in trades:
+            for trade_id, symbol, side, entry_price, total_size in trades:
                 price = latest_price.get(symbol)
                 if price is None:
                     continue
@@ -758,30 +758,32 @@ def monitor_active_trades():
                         reason = f"{lvl_type}-hit-{step}" if lvl_type == "tp" else "sl-hit"
                         print(f"⚡️ Сработал уровень {lvl_type.upper()} step={step} по {symbol}: цена {price}, цель {target_price}", flush=True)
 
-                        # 3. Расчёт PnL с учётом комиссии
+                        # 3. Расчёт PnL
                         volume = exit_percent / 100
+                        actual_size = total_size * volume
                         if side == "long":
                             gross_pnl = (price - entry_price) * volume
                         else:  # short
                             gross_pnl = (entry_price - price) * volume
 
-                        entry_fee = entry_price * 0.0005 * volume  # 0.05%
-                        exit_fee = price * 0.0002 * volume         # 0.02%
+                        entry_fee = entry_price * 0.0005 * volume
+                        exit_fee = price * 0.0002 * volume
                         net_pnl = gross_pnl - entry_fee - exit_fee
 
                         # 4. Вставка в trade_exits
                         cur.execute("""
-                            INSERT INTO trade_exits (trade_id, price, percent, reason, planned, pnl)
-                            VALUES (%s, %s, %s, %s, false, %s)
+                            INSERT INTO trade_exits (trade_id, price, size, percent, reason, planned, pnl)
+                            VALUES (%s, %s, %s, %s, %s, false, %s)
                         """, (
                             trade_id,
                             price,
+                            actual_size,
                             exit_percent,
                             reason,
                             net_pnl
                         ))
 
-                        # 5. Удаляем уровень
+                        # 5. Удаление уровня
                         cur.execute("DELETE FROM trades_sltp WHERE id = %s", (lvl_id,))
 
                         # 6. Закрытие сделки
@@ -803,7 +805,7 @@ def monitor_active_trades():
                                 VALUES (%s, 'sl', 0, %s, 100, NULL)
                             """, (trade_id, new_sl))
 
-                        break  # обработан один уровень → ждём новый цикл
+                        break  # выход после первого сработавшего уровня
 
             conn.commit()
             conn.close()

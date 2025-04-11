@@ -708,10 +708,11 @@ def execute_trade(symbol, action, strategy):
         msg = f"❌ Ошибка execute_trade: {e}"
         print(msg, flush=True)
         entrylog.append(msg)
-# === Мониторинг открытых сделок и расчёт PnL при SL/TP ===
+# === Мониторинг открытых сделок и расчёт PnL на основе position ===
 def monitor_active_trades():
     while True:
         try:
+            # Подключение к базе
             conn = psycopg2.connect(
                 dbname=PG_NAME,
                 user=PG_USER,
@@ -721,20 +722,20 @@ def monitor_active_trades():
             )
             cur = conn.cursor()
 
-            # 1. Все открытые сделки
+            # Получаем все открытые сделки
             cur.execute("""
-                SELECT id, symbol, side, entry_price, size
+                SELECT id, symbol, side, entry_price, position
                 FROM trades
                 WHERE status = 'open'
             """)
             trades = cur.fetchall()
 
-            for trade_id, symbol, side, entry_price, total_size in trades:
+            for trade_id, symbol, side, entry_price, total_position in trades:
                 price = latest_price.get(symbol)
                 if price is None:
                     continue
 
-                # 2. Все активные уровни SL/TP
+                # Получаем все активные уровни SL/TP
                 cur.execute("""
                     SELECT id, type, step, target_price, exit_percent, new_stop_loss
                     FROM trades_sltp
@@ -746,6 +747,7 @@ def monitor_active_trades():
                 for level in levels:
                     lvl_id, lvl_type, step, target_price, exit_percent, new_sl = level
 
+                    # Проверка срабатывания уровня
                     triggered = (
                         price >= target_price if side == "long" and lvl_type == "tp" else
                         price <= target_price if side == "short" and lvl_type == "tp" else
@@ -758,35 +760,38 @@ def monitor_active_trades():
                         reason = f"{lvl_type}-hit-{step}" if lvl_type == "tp" else "sl-hit"
                         print(f"⚡️ Сработал уровень {lvl_type.upper()} step={step} по {symbol}: цена {price}, цель {target_price}", flush=True)
 
-                        # 3. Расчёт PnL
-                        volume = exit_percent / 100
-                        actual_size = total_size * volume
-                        if side == "long":
-                            gross_pnl = (price - entry_price) * volume
-                        else:  # short
-                            gross_pnl = (entry_price - price) * volume
+                        # Расчёт фактического количества монет и суммы выхода
+                        actual_position = total_position * (exit_percent / 100)
+                        exit_amount = actual_position * price
 
-                        entry_fee = entry_price * 0.0005 * volume
-                        exit_fee = price * 0.0002 * volume
+                        # Расчёт PnL
+                        if side == "long":
+                            gross_pnl = (price - entry_price) * actual_position
+                        else:
+                            gross_pnl = (entry_price - price) * actual_position
+
+                        entry_fee = entry_price * 0.0005 * actual_position
+                        exit_fee = price * 0.0002 * actual_position
                         net_pnl = gross_pnl - entry_fee - exit_fee
 
-                        # 4. Вставка в trade_exits
+                        # Вставка в trade_exits
                         cur.execute("""
-                            INSERT INTO trade_exits (trade_id, price, size, percent, reason, planned, pnl)
-                            VALUES (%s, %s, %s, %s, %s, false, %s)
+                            INSERT INTO trade_exits (trade_id, price, size, position, percent, reason, planned, pnl)
+                            VALUES (%s, %s, %s, %s, %s, %s, false, %s)
                         """, (
                             trade_id,
                             price,
-                            actual_size,
+                            exit_amount,
+                            actual_position,
                             exit_percent,
                             reason,
                             net_pnl
                         ))
 
-                        # 5. Удаление уровня
+                        # Удаление сработавшего уровня
                         cur.execute("DELETE FROM trades_sltp WHERE id = %s", (lvl_id,))
 
-                        # 6. Закрытие сделки (SL или TP6)
+                        # Закрытие сделки при SL или TP6
                         if lvl_type == "sl" or step == 6:
                             cur.execute("""
                                 SELECT SUM(pnl)
@@ -804,7 +809,7 @@ def monitor_active_trades():
                                 WHERE id = %s
                             """, (price, pnl_total, trade_id))
 
-                        # 7. Перенос SL, если это TP и задан новый уровень
+                        # Перенос SL, если задан новый уровень
                         if lvl_type == "tp" and new_sl is not None:
                             cur.execute("""
                                 DELETE FROM trades_sltp
@@ -815,7 +820,7 @@ def monitor_active_trades():
                                 VALUES (%s, 'sl', 0, %s, 100, NULL)
                             """, (trade_id, new_sl))
 
-                        break  # выход после одного срабатывания
+                        break  # обработан один уровень → ждём следующую цену
 
             conn.commit()
             conn.close()

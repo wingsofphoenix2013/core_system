@@ -560,7 +560,7 @@ def check_direction_allowed(direction, action):
         print(msg, flush=True)
         entrylog.append(msg)
         return False
-# === Проверка: ширина канала ≥ 3 × ATR на момент входа ===
+# === Проверка: ширина канала ≥ 2 × ATR на момент входа ===
 def check_channel_width_vs_atr(symbol):
     try:
         atr = get_atr(symbol)
@@ -598,16 +598,15 @@ def check_channel_width_vs_atr(symbol):
             return False
 
         width_percent = result["width_percent"]
-        slope = result["slope"]
         mid = result["mid"]
         atr_percent = (atr / mid) * 100 if mid else 0
-        threshold = 3 * atr_percent
+        threshold = 2 * atr_percent  # 🔧 было 3, стало 2
 
         if width_percent >= threshold:
-            msg = f"✅ Ширина канала {width_percent:.2f}% ≥ 3×ATR ({threshold:.2f}%)"
+            msg = f"✅ Ширина канала {width_percent:.2f}% ≥ 2×ATR ({threshold:.2f}%)"
             result_ok = True
         else:
-            msg = f"❌ Ширина канала {width_percent:.2f}% < 3×ATR ({threshold:.2f}%)"
+            msg = f"❌ Ширина канала {width_percent:.2f}% < 2×ATR ({threshold:.2f}%)"
             result_ok = False
 
         print(msg, flush=True)

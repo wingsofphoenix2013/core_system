@@ -786,15 +786,25 @@ def monitor_active_trades():
                         # 5. Удаление уровня
                         cur.execute("DELETE FROM trades_sltp WHERE id = %s", (lvl_id,))
 
-                        # 6. Закрытие сделки
+                        # 6. Закрытие сделки (SL или TP6)
                         if lvl_type == "sl" or step == 6:
                             cur.execute("""
-                                UPDATE trades
-                                SET status = 'closed'
-                                WHERE id = %s
+                                SELECT SUM(pnl)
+                                FROM trade_exits
+                                WHERE trade_id = %s
                             """, (trade_id,))
+                            pnl_total = cur.fetchone()[0] or 0
 
-                        # 7. Перенос SL
+                            cur.execute("""
+                                UPDATE trades
+                                SET status = 'closed',
+                                    exit_time = now(),
+                                    exit_price = %s,
+                                    pnl = %s
+                                WHERE id = %s
+                            """, (price, pnl_total, trade_id))
+
+                        # 7. Перенос SL, если это TP и задан новый уровень
                         if lvl_type == "tp" and new_sl is not None:
                             cur.execute("""
                                 DELETE FROM trades_sltp
@@ -805,7 +815,7 @@ def monitor_active_trades():
                                 VALUES (%s, 'sl', 0, %s, 100, NULL)
                             """, (trade_id, new_sl))
 
-                        break  # выход после первого сработавшего уровня
+                        break  # выход после одного срабатывания
 
             conn.commit()
             conn.close()
